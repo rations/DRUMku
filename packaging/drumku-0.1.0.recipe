@@ -1,0 +1,43 @@
+# HaikuPorts recipe for DRUMku (MIDI drum sampler VST3 plug-in).
+#
+# NOT YET VALIDATED with haikuporter. On the target: pin SOURCE_URI / SOURCE_URI_2 to
+# tags/commits with checksums, and confirm the second-source ($sourceDir2) wiring for
+# the VST3 SDK with `haikuporter -c drumku`.
+SUMMARY="DRUMku - MIDI drum sampler VST3 plug-in (Haiku)"
+DESCRIPTION="A MIDI-triggered drum sampler as a native VST3 plug-in: loads WAV samples \
+per pad and plays them from incoming MIDI notes. The Steinberg VST3 SDK is linked \
+statically (MIT)."
+HOMEPAGE="https://github.com/rations/DRUMku"
+COPYRIGHT="2026 rations; 2025 Steinberg Media Technologies GmbH"
+LICENSE="MIT"
+REVISION="1"
+SOURCE_URI="git+https://github.com/rations/DRUMku#master"
+SOURCE_DIR="DRUMku"
+SOURCE_URI_2="git+https://github.com/rations/VST3-haiku#master"
+SOURCE_DIR_2="VST3-haiku"
+ARCHITECTURES="x86_64"
+
+PROVIDES="
+	drumku = 0.1.0
+	"
+REQUIRES="
+	haiku
+	"
+BUILD_REQUIRES="
+	haiku_devel
+	cmd:cmake
+	cmd:ninja
+	"
+
+BUILD()
+{
+	cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+		-DVST3_SDK_DIR="$sourceDir2/vst3sdk"
+	ninja -C build
+}
+
+INSTALL()
+{
+	mkdir -p $addOnsDir/vst3
+	cp -r build/VST3/Release/DRUMku.vst3 $addOnsDir/vst3/
+}

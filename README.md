@@ -29,6 +29,14 @@ make validate   # run the SDK validator against the installed bundle
 Point the build at a specific SDK with `-DVST3_SDK_DIR=<path>` (default
 `../VST3-haiku/vst3sdk`).
 
+## Install / packaging (Haiku)
+
+- From source: `./build-from-source.sh` (installs `DRUMku.vst3` to
+  `~/config/non-packaged/add-ons/vst3`).
+- Prebuilt package: `packaging/make-hpkg.sh` → `drumku-0.1.0-1-x86_64.hpkg`
+  (`pkgman install ./drumku-*.hpkg`). HaikuPorts recipe: `packaging/drumku-0.1.0.recipe`.
+- See the stack overview in `jackDAW-haiku/STACK.md`.
+
 ## Licence
 
 MIT. VST is a trademark of Steinberg Media Technologies GmbH.

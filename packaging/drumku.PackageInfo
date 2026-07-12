@@ -1,0 +1,25 @@
+name			drumku
+version			0.1.0-1
+architecture	x86_64
+summary			"DRUMku - MIDI drum sampler VST3 plug-in (Haiku)"
+description		"A MIDI-triggered drum sampler as a native VST3 plug-in: loads WAV
+samples per pad and plays them from incoming MIDI notes. The Steinberg VST3 SDK is
+linked statically (MIT). Install alongside a VST3 host such as JackDAW."
+packager		"rations <ehqcar@proton.me>"
+vendor			"rations"
+copyrights {
+	"2026 rations"
+	"2025 Steinberg Media Technologies GmbH"
+}
+licenses {
+	"MIT"
+}
+provides {
+	drumku = 0.1.0
+}
+requires {
+	haiku
+}
+urls {
+	"https://github.com/rations/DRUMku"
+}
