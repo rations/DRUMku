@@ -18,7 +18,8 @@
 #include <string>
 #include <vector>
 
-namespace DRUMku {
+namespace DRUMku
+{
 
 //------------------------------------------------------------------------
 class DrumProcessor : public Steinberg::Vst::AudioEffect
@@ -52,16 +53,21 @@ public:
 
 private:
     void handleParameterChanges(Steinberg::Vst::IParameterChanges *changes);
-    void processEvents(Steinberg::Vst::IEventList *events);
+    void processEvents(Steinberg::Vst::IEventList *events,
+                       Steinberg::Vst::IParameterChanges *outChanges);
 
     DrumEngine mEngine;
 
     std::atomic<double> mBypass{0.0};
+
+    // Plug-in-side MIDI learn: armed slot index, -1 when disarmed. Written on
+    // the message thread (notify), consumed on the RT thread (process) —
+    // atomics only, no locks.
+    std::atomic<Steinberg::int32> mLearnSlot{-1};
     // Normalized default matching the controller's "Slots" parameter default, so a
     // state saved without ever moving that control restores kDefaultSlotCount rows
     // (not 1). UI-only hint; setState overwrites it.
-    std::atomic<double> mSlotCountNorm{(double)(kDefaultSlotCount - 1) /
-                                       (double)(kMaxSlots - 1)};
+    std::atomic<double> mSlotCountNorm{(double)(kDefaultSlotCount - 1) / (double)(kMaxSlots - 1)};
 
     // Scratch right channel, used only when the host gives a mono output bus.
     std::vector<float> mScratchR;

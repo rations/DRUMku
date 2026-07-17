@@ -2,6 +2,7 @@
 
 #include "drumcontroller.h"
 #include "drumids.h"
+#include "drumview.h"
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
@@ -13,7 +14,8 @@
 
 using namespace Steinberg;
 
-namespace DRUMku {
+namespace DRUMku
+{
 
 // The one and only definition of the IDrumLoader interface ID.
 DEF_CLASS_IID(IDrumLoader)
@@ -44,8 +46,8 @@ tresult PLUGIN_API DrumController::initialize(FUnknown *context)
 
         std::snprintf(ascii, sizeof(ascii), "Slot %d Vol", i + 1);
         UString(title, 64).fromAscii(ascii);
-        auto *vol = new Vst::RangeParameter(title, (Vst::ParamID)(kSlotVolumeBase + i), nullptr, 0.0,
-                                            1.0, 0.8, 0, Vst::ParameterInfo::kCanAutomate);
+        auto *vol = new Vst::RangeParameter(title, (Vst::ParamID)(kSlotVolumeBase + i), nullptr,
+                                            0.0, 1.0, 0.8, 0, Vst::ParameterInfo::kCanAutomate);
         vol->setPrecision(2);
         parameters.addParameter(vol);
 
@@ -56,6 +58,15 @@ tresult PLUGIN_API DrumController::initialize(FUnknown *context)
                                              kNoteUnassigned, Vst::ParameterInfo::kCanAutomate);
         note->setPrecision(0);
         parameters.addParameter(note);
+
+        // Transient pad-activity pulse (processor -> editor via output changes).
+        // Hidden and read-only: never automated, never persisted, invisible to
+        // generic parameter UIs.
+        std::snprintf(ascii, sizeof(ascii), "Slot %d Activity", i + 1);
+        UString(title, 64).fromAscii(ascii);
+        parameters.addParameter(title, nullptr, 0, 0.0,
+                                Vst::ParameterInfo::kIsReadOnly | Vst::ParameterInfo::kIsHidden,
+                                (Vst::ParamID)(kSlotActivityBase + i));
     }
 
     return kResultOk;
@@ -97,6 +108,36 @@ tresult PLUGIN_API DrumController::setComponentState(IBStream *state)
 }
 
 //------------------------------------------------------------------------
+IPlugView *PLUGIN_API DrumController::createView(FIDString name)
+{
+    if (name && strcmp(name, Vst::ViewType::kEditor) == 0)
+        return new DrumEditorView(this);
+    return nullptr;
+}
+
+void DrumController::editorAttached(Vst::EditorView *editor)
+{
+    mView = static_cast<DrumEditorView *>(editor);
+}
+
+void DrumController::editorRemoved(Vst::EditorView *editor)
+{
+    if (mView == editor)
+        mView = nullptr;
+}
+
+tresult PLUGIN_API DrumController::setParamNormalized(Vst::ParamID tag, Vst::ParamValue value)
+{
+    tresult result = EditController::setParamNormalized(tag, value);
+    // Push the change into the live editor. Hosts call setParamNormalized on
+    // the window looper thread while an editor is open, so this is a plain
+    // same-thread call.
+    if (mView && result == kResultTrue)
+        mView->ParamChanged(tag, value);
+    return result;
+}
+
+//------------------------------------------------------------------------
 tresult DrumController::sendSample(int32 slot, const char8 *path)
 {
     // Forward the path (with its slot index) to the processor over the
@@ -108,6 +149,21 @@ tresult DrumController::sendSample(int32 slot, const char8 *path)
     message->getAttributes()->setInt(kSlotAttr, slot);
     const char *p = path ? path : "";
     message->getAttributes()->setBinary(kPathAttr, p, static_cast<uint32>(strlen(p)));
+    return sendMessage(message);
+}
+
+//------------------------------------------------------------------------
+tresult DrumController::armLearn(int32 slot)
+{
+    // -1 disarms; otherwise the processor binds the next note-on to `slot` and
+    // reports the captured note back through the output parameter changes.
+    if (slot < -1 || slot >= kMaxSlots)
+        return kInvalidArgument;
+    IPtr<Vst::IMessage> message = owned(allocateMessage());
+    if (!message)
+        return kResultFalse;
+    message->setMessageID(kMsgArmLearn);
+    message->getAttributes()->setInt(kSlotAttr, slot);
     return sendMessage(message);
 }
 

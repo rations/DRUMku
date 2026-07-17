@@ -32,7 +32,8 @@ static inline void drumku_set_denormal_mode(void)
 
 using namespace Steinberg;
 
-namespace DRUMku {
+namespace DRUMku
+{
 
 //------------------------------------------------------------------------
 DrumProcessor::DrumProcessor()
@@ -134,7 +135,25 @@ void DrumProcessor::handleParameterChanges(Vst::IParameterChanges *changes)
 }
 
 //------------------------------------------------------------------------
-void DrumProcessor::processEvents(Vst::IEventList *events)
+// Write one point to an output parameter queue. RT-safe under the SDK host
+// implementation: ParameterChanges is pre-sized by the host and every queue
+// pre-reserves 5 points at construction — the point-count guard keeps us
+// inside that reserve so addPoint never grows the vector on the RT thread.
+static void writeOutputPoint(Vst::IParameterChanges *outChanges, Vst::ParamID id,
+                             Vst::ParamValue value, int32 sampleOffset)
+{
+    if (!outChanges)
+        return;
+    int32 queueIndex = 0;
+    Vst::IParamValueQueue *queue = outChanges->addParameterData(id, queueIndex);
+    if (!queue || queue->getPointCount() >= 4)
+        return;
+    int32 pointIndex = 0;
+    queue->addPoint(sampleOffset, value, pointIndex);
+}
+
+//------------------------------------------------------------------------
+void DrumProcessor::processEvents(Vst::IEventList *events, Vst::IParameterChanges *outChanges)
 {
     if (!events)
         return;
@@ -146,7 +165,28 @@ void DrumProcessor::processEvents(Vst::IEventList *events)
         // Only note-on triggers a sample; drums are one-shots, so note-off is
         // ignored. A note-on with zero velocity is a note-off in disguise.
         if (e.type == Vst::Event::kNoteOnEvent && e.noteOn.velocity > 0.0f) {
-            mEngine.noteOn(e.noteOn.pitch, e.noteOn.velocity, e.sampleOffset);
+            const int pitch = e.noteOn.pitch;
+
+            // MIDI learn: bind the armed slot to this note and report the
+            // capture back to the controller as an output parameter change.
+            int32 learnSlot = mLearnSlot.exchange(-1, std::memory_order_acq_rel);
+            if (learnSlot >= 0 && learnSlot < kMaxSlots && pitch >= 0 && pitch <= 127) {
+                mEngine.setSlotNote((int)learnSlot, pitch);
+                writeOutputPoint(outChanges, (Vst::ParamID)(kSlotNoteBase + learnSlot),
+                                 (double)pitch / (double)kNoteUnassigned, e.sampleOffset);
+            } else if (learnSlot >= 0) {
+                mLearnSlot.store(learnSlot, std::memory_order_release); // stay armed
+            }
+
+            mEngine.noteOn(pitch, e.noteOn.velocity, e.sampleOffset);
+
+            // Pad activity pulse for every slot bound to this pitch, so an
+            // editor can flash the pads that just fired.
+            for (int s = 0; s < kMaxSlots; ++s) {
+                if (mEngine.slotNote(s) == pitch)
+                    writeOutputPoint(outChanges, (Vst::ParamID)(kSlotActivityBase + s),
+                                     (double)e.noteOn.velocity, e.sampleOffset);
+            }
         }
     }
 }
@@ -177,7 +217,7 @@ tresult PLUGIN_API DrumProcessor::process(Vst::ProcessData &data)
     if (mBypass.load(std::memory_order_relaxed) > 0.5) {
         mEngine.allNotesOff();
     } else {
-        processEvents(data.inputEvents);
+        processEvents(data.inputEvents, data.outputParameterChanges);
         mEngine.renderBlock(L, R, numSamples);
     }
 
@@ -204,6 +244,14 @@ tresult PLUGIN_API DrumProcessor::notify(Vst::IMessage *message)
             path.assign(static_cast<const char *>(data), size);
 
         mEngine.loadSample((int)slot, path); // empty path clears the slot
+        return kResultOk;
+    }
+    if (id && strcmp(id, kMsgArmLearn) == 0) {
+        int64 slot = -1;
+        message->getAttributes()->getInt(kSlotAttr, slot);
+        if (slot < -1 || slot >= kMaxSlots)
+            return kInvalidArgument;
+        mLearnSlot.store((int32)slot, std::memory_order_release);
         return kResultOk;
     }
 
