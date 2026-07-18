@@ -5,7 +5,7 @@ set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-VERSION=0.1.0
+VERSION=0.2.0
 REVISION=1
 STAGE="$HERE/stage"
 SDK="${VST3_SDK_DIR:-$ROOT/../VST3-haiku/vst3sdk}"

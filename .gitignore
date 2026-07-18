@@ -5,3 +5,7 @@ task.md
 PLAN.md
 .claude/
 prompt
+
+# Built packages: attached to GitHub Releases, never committed.
+packaging/*.hpkg
+packaging/stage/
