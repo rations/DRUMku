@@ -5,7 +5,7 @@ set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-VERSION=0.2.0
+VERSION=0.3.0
 REVISION=1
 STAGE="$HERE/stage"
 SDK="${VST3_SDK_DIR:-$ROOT/../VST3-haiku/vst3sdk}"
@@ -20,8 +20,8 @@ ninja -C build
 
 BUNDLE=$(find build -type d -name 'DRUMku.vst3' | head -1)
 [ -n "$BUNDLE" ] || { echo "!! DRUMku.vst3 not built" >&2; exit 1; }
-mkdir -p "$STAGE/add-ons/vst3"
-cp -r "$BUNDLE" "$STAGE/add-ons/vst3/"
+mkdir -p "$STAGE/add-ons/media/VST3"
+cp -r "$BUNDLE" "$STAGE/add-ons/media/VST3/"
 
 cp "$HERE/drumku.PackageInfo" "$STAGE/.PackageInfo"
 OUT="$HERE/drumku-$VERSION-$REVISION-x86_64.hpkg"

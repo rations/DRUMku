@@ -13,6 +13,6 @@ cd "$HERE"
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DVST3_SDK_DIR="$SDK"
 ninja -C build
 
-mkdir -p "$HOME/config/non-packaged/add-ons/vst3"
-cp -r build/VST3/Release/DRUMku.vst3 "$HOME/config/non-packaged/add-ons/vst3/"
-echo ">> Installed DRUMku.vst3 to ~/config/non-packaged/add-ons/vst3"
+mkdir -p "$HOME/config/non-packaged/add-ons/media/VST3"
+cp -r build/VST3/Release/DRUMku.vst3 "$HOME/config/non-packaged/add-ons/media/VST3/"
+echo ">> Installed DRUMku.vst3 to ~/config/non-packaged/add-ons/media/VST3"

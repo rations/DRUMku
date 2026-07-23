@@ -1,5 +1,5 @@
 name			drumku
-version			0.2.0-1
+version			0.3.0-1
 architecture	x86_64
 summary			"DRUMku - MIDI drum sampler VST3 plug-in (Haiku)"
 description		"A MIDI-triggered drum sampler as a native VST3 plug-in: loads WAV
@@ -15,7 +15,7 @@ licenses {
 	"MIT"
 }
 provides {
-	drumku = 0.2.0
+	drumku = 0.3.0
 }
 requires {
 	haiku
