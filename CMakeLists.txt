@@ -9,7 +9,7 @@
 cmake_minimum_required(VERSION 3.25.0)
 
 project(smtg-drumku
-    VERSION 0.1.0
+    VERSION 0.4.0
     DESCRIPTION "DRUMku MIDI drum sampler VST3 for Haiku"
 )
 

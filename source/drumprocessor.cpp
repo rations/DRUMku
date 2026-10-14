@@ -202,23 +202,39 @@ tresult PLUGIN_API DrumProcessor::process(Vst::ProcessData &data)
     if (data.numSamples <= 0 || data.numOutputs < 1 || !data.outputs[0].channelBuffers32)
         return kResultOk;
 
-    const int32 numSamples = std::min(data.numSamples, mMaxBlockSize);
+    const int32 numSamples = data.numSamples;
     const int32 numOutCh = data.outputs[0].numChannels;
     float *L = data.outputs[0].channelBuffers32[0];
+    // A mono output renders its right channel into the scratch buffer, which
+    // holds one chunk (mMaxBlockSize frames), not the whole block.
     float *R = (numOutCh > 1 && data.outputs[0].channelBuffers32[1])
                    ? data.outputs[0].channelBuffers32[1]
-                   : mScratchR.data();
+                   : nullptr;
     if (!L)
         return kResultOk;
 
     std::memset(L, 0, (size_t)numSamples * sizeof(float));
-    std::memset(R, 0, (size_t)numSamples * sizeof(float));
+    if (R)
+        std::memset(R, 0, (size_t)numSamples * sizeof(float));
 
     if (mBypass.load(std::memory_order_relaxed) > 0.5) {
         mEngine.allNotesOff();
     } else {
         processEvents(data.inputEvents, data.outputParameterChanges);
-        mEngine.renderBlock(L, R, numSamples);
+        // The host may hand us more than it promised in setupProcessing.
+        // Render in chunks of at most mMaxBlockSize rather than clamping,
+        // which left the tail of the block silent and dropped any note-on
+        // past it. Events were queued above with their whole-block offsets;
+        // a voice's onset delay carries across renderBlock calls, so each
+        // still starts on its exact sample.
+        const int32 chunk = mMaxBlockSize > 0 ? mMaxBlockSize : numSamples;
+        for (int32 done = 0; done < numSamples; done += chunk) {
+            const int32 n = std::min(chunk, numSamples - done);
+            float *chunkR = R ? R + done : mScratchR.data();
+            if (!R)
+                std::memset(chunkR, 0, (size_t)n * sizeof(float));
+            mEngine.renderBlock(L + done, chunkR, n);
+        }
     }
 
     data.outputs[0].silenceFlags = 0;

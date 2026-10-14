@@ -6,8 +6,10 @@
 // toms) and round cymbal pads (hi-hat, crashes, ride) map to fixed slots 0-8;
 // the control strip below drives the selected pad: Load/Clear .wav (via the
 // controller's IDrumLoader), MIDI Learn (plug-in-side, fed back through the
-// note parameter), and a volume slider. Pads flash on the hidden activity
-// parameters and every sprite load is NULL-checked with a flat-color
+// note parameter), and a volume slider. "Expand kit" opens the kit rack page,
+// one row per shown slot, which is the only way to reach slots beyond the nine
+// pads; its footer grows and shrinks the shown row count. Pads flash on the
+// hidden activity parameters and every sprite load is NULL-checked with a flat-color
 // fallback, so a missing Resources dir degrades, never crashes.
 //
 // Threading: everything in this file runs on the host window's looper thread
@@ -22,6 +24,8 @@
 #include <FilePanel.h>
 #include <MessageRunner.h>
 #include <Path.h>
+#include <ScrollBar.h>
+#include <ScrollView.h>
 #include <Slider.h>
 #include <StringView.h>
 #include <TranslationUtils.h>
@@ -46,7 +50,19 @@ const uint32 kMsgLoadBtn = 'dkLd';
 const uint32 kMsgClearBtn = 'dkCl';
 const uint32 kMsgLearnBtn = 'dkLn';
 const uint32 kMsgTick = 'dkTk';
+const uint32 kMsgExpand = 'dkEx';
+const uint32 kMsgRackClose = 'dkRc';
+const uint32 kMsgRackAdd = 'dkRa';
+const uint32 kMsgRackRemove = 'dkRr';
 const int32 kSliderScale = 1000; // BSlider is integer-valued; 0..1000 -> 0..1
+
+// Kit rack page layout (editor canvas coordinates).
+const float kRackRowsTop = 56;
+const float kRackRowH = 32;
+const int kRackVisibleRows = 11;
+const float kRackFooterTop = kRackRowsTop + kRackVisibleRows * kRackRowH + 10;
+const rgb_color kRackBg = {20, 23, 28, 255};
+const rgb_color kRackRowBg = {26, 29, 35, 255};
 
 const rgb_color kStripBg = {12, 14, 17, 255}; // geometry.sh STRIP_BG
 const rgb_color kLabelColor = {205, 210, 215, 255};
@@ -114,6 +130,228 @@ bool insideCircle(float dx, float dy, float r)
 } // namespace
 
 //------------------------------------------------------------------------
+// DrumRackView — the kit rack page: every shown slot as a row, so the slots
+// the nine pads do not reach can still be loaded, learned and mixed. It covers
+// the whole editor while open. It holds no state of its own: every value is
+// read from the controller, and every edit is posted to the kit view, which
+// owns the file panel and the learn state and applies it exactly as the strip
+// does.
+//------------------------------------------------------------------------
+class DrumRackView : public BView
+{
+public:
+    DrumRackView(BRect frame, BHandler *target)
+        : BView(frame, "DRUMku-rack", B_FOLLOW_NONE, B_WILL_DRAW), mTarget(target)
+    {
+        SetViewColor(kRackBg);
+        const float w = frame.Width();
+
+        mClose = new BButton(BRect(w - 96, 14, w - 16, 40), "rack-close", "Close",
+                             new BMessage(kMsgRackClose));
+        AddChild(mClose);
+
+        // The rows live in a plain view taller than its scroll view: the
+        // scroll bar's range is the hidden part, set in SetSlotCount().
+        BRect rowsFrame(0, 0, w - B_V_SCROLL_BAR_WIDTH - 1, kRackVisibleRows * kRackRowH - 1);
+        mRows = new BView(rowsFrame, "rack-rows", B_FOLLOW_NONE, B_WILL_DRAW);
+        mRows->SetViewColor(kRackBg);
+        for (int i = 0; i < kMaxSlots; ++i)
+            buildRow(i, rowsFrame.Width());
+        mScroll = new BScrollView("rack-scroll", mRows, B_FOLLOW_NONE, 0, false, true, B_NO_BORDER);
+        mScroll->MoveTo(0, kRackRowsTop);
+        AddChild(mScroll);
+
+        const float fy = kRackFooterTop;
+        mAdd = new BButton(BRect(16, fy, 136, fy + 28), "rack-add", "+ Add slot",
+                           new BMessage(kMsgRackAdd));
+        AddChild(mAdd);
+        mRemove = new BButton(BRect(144, fy, 276, fy + 28), "rack-remove",
+                              "\xe2\x88\x92 Remove slot", new BMessage(kMsgRackRemove));
+        AddChild(mRemove);
+        BStringView *hint = new BStringView(
+            BRect(290, fy + 4, w - 16, fy + 24), "rack-hint",
+            "Hidden slots keep their sample and keep playing \xc2\xb7 wheel scrolls");
+        hint->SetViewColor(kRackBg);
+        hint->SetHighColor(kDimColor);
+        AddChild(hint);
+    }
+
+    void AttachedToWindow() override
+    {
+        BView::AttachedToWindow();
+        mClose->SetTarget(mTarget);
+        mAdd->SetTarget(mTarget);
+        mRemove->SetTarget(mTarget);
+        for (int i = 0; i < kMaxSlots; ++i) {
+            mRow[i].load->SetTarget(mTarget);
+            mRow[i].clear->SetTarget(mTarget);
+            mRow[i].learn->SetTarget(mTarget);
+            mRow[i].volume->SetTarget(mTarget);
+        }
+    }
+
+    void Draw(BRect) override
+    {
+        SetHighColor(kLabelColor);
+        SetFontSize(15);
+        DrawString("KIT RACK", BPoint(20, 34));
+        char text[64];
+        std::snprintf(text, sizeof(text), "%d of %d slots shown", mSlotCount, (int)kMaxSlots);
+        SetHighColor(kDimColor);
+        SetFontSize(12);
+        DrawString(text, BPoint(140, 33));
+        SetHighColor(58, 63, 70);
+        StrokeLine(BPoint(16, kRackRowsTop - 6), BPoint(Bounds().right - 16, kRackRowsTop - 6));
+        StrokeLine(BPoint(16, kRackFooterTop - 6), BPoint(Bounds().right - 16, kRackFooterTop - 6));
+    }
+
+    // Show rows 0 .. count-1. Growing scrolls the new row into view; shrinking
+    // keeps the scroll position inside the shorter list.
+    void SetSlotCount(int count)
+    {
+        if (count < 1)
+            count = 1;
+        if (count > kMaxSlots)
+            count = kMaxSlots;
+        const bool grew = count > mSlotCount;
+        for (int i = 0; i < kMaxSlots; ++i) {
+            BView *row = mRow[i].row;
+            if (i < count && row->IsHidden())
+                row->Show();
+            else if (i >= count && !row->IsHidden())
+                row->Hide();
+        }
+        mSlotCount = count;
+
+        const float hidden = (count - kRackVisibleRows) * kRackRowH;
+        if (BScrollBar *bar = mScroll->ScrollBar(B_VERTICAL)) {
+            bar->SetRange(0, hidden > 0 ? hidden : 0);
+            bar->SetProportion((float)kRackVisibleRows / (float)(count > 0 ? count : 1));
+            bar->SetSteps(kRackRowH, kRackRowH * (kRackVisibleRows - 1));
+            if (grew && hidden > 0)
+                bar->SetValue(hidden);
+        }
+        mRemove->SetEnabled(count > 1);
+        mAdd->SetEnabled(count < kMaxSlots);
+        Invalidate();
+    }
+
+    void RefreshRow(int slot, DrumController *controller, int armedSlot, const char *padName)
+    {
+        if (slot < 0 || slot >= kMaxSlots)
+            return;
+        Row &r = mRow[slot];
+        char text[B_PATH_NAME_LENGTH + 32];
+
+        if (padName)
+            std::snprintf(text, sizeof(text), "%d  %s", slot + 1, padName);
+        else
+            std::snprintf(text, sizeof(text), "%d  Slot %d", slot + 1, slot + 1);
+        r.name->SetText(text);
+
+        char path[B_PATH_NAME_LENGTH] = "";
+        if (controller->getSampleFile(slot, path, sizeof(path)) == kResultOk && path[0]) {
+            const char *base = std::strrchr(path, '/');
+            r.file->SetText(base ? base + 1 : path);
+            r.file->SetHighColor(kLabelColor);
+        } else {
+            r.file->SetText("(empty)");
+            r.file->SetHighColor(kDimColor);
+        }
+
+        if (armedSlot == slot) {
+            r.note->SetText("learning" B_UTF8_ELLIPSIS);
+        } else {
+            double norm = controller->getParamNormalized((Vst::ParamID)(kSlotNoteBase + slot));
+            int note = (int)(norm * (double)kNoteUnassigned + 0.5);
+            noteName(note >= kNoteUnassigned ? -1 : note, text, sizeof(text));
+            r.note->SetText(text);
+        }
+        r.learn->SetLabel(armedSlot == slot ? "Stop" : "Learn");
+
+        SetVolume(slot, controller->getParamNormalized((Vst::ParamID)(kSlotVolumeBase + slot)));
+    }
+
+    void SetVolume(int slot, double norm)
+    {
+        if (slot < 0 || slot >= kMaxSlots)
+            return;
+        int32 v = (int32)(norm * kSliderScale + 0.5);
+        if (mRow[slot].volume->Value() != v)
+            mRow[slot].volume->SetValue(v);
+    }
+
+private:
+    struct Row {
+        BView *row = nullptr;
+        BStringView *name = nullptr;
+        BStringView *file = nullptr;
+        BButton *load = nullptr;
+        BButton *clear = nullptr;
+        BButton *learn = nullptr;
+        BSlider *volume = nullptr;
+        BStringView *note = nullptr;
+    };
+
+    static BMessage *slotMessage(uint32 what, int slot)
+    {
+        BMessage *msg = new BMessage(what);
+        msg->AddInt32("slot", slot);
+        return msg;
+    }
+
+    void buildRow(int slot, float width)
+    {
+        Row &r = mRow[slot];
+        r.row = new BView(BRect(0, slot * kRackRowH, width, (slot + 1) * kRackRowH - 1), "rack-row",
+                          B_FOLLOW_NONE, 0);
+        r.row->SetViewColor((slot % 2) ? kRackRowBg : kRackBg);
+        const rgb_color bg = r.row->ViewColor();
+
+        r.name = new BStringView(BRect(8, 6, 116, 26), "name", "");
+        r.file = new BStringView(BRect(120, 6, 296, 26), "file", "");
+        r.note = new BStringView(BRect(642, 6, width - 4, 26), "note", "");
+        BStringView *labels[3] = {r.name, r.file, r.note};
+        for (BStringView *label : labels) {
+            label->SetViewColor(bg);
+            label->SetLowColor(bg);
+            label->SetHighColor(kLabelColor);
+            r.row->AddChild(label);
+        }
+
+        r.load = new BButton(BRect(300, 3, 360, 29), "load", "Load" B_UTF8_ELLIPSIS,
+                             slotMessage(kMsgLoadBtn, slot));
+        r.clear =
+            new BButton(BRect(364, 3, 420, 29), "clear", "Clear", slotMessage(kMsgClearBtn, slot));
+        r.learn =
+            new BButton(BRect(424, 3, 480, 29), "learn", "Learn", slotMessage(kMsgLearnBtn, slot));
+        r.row->AddChild(r.load);
+        r.row->AddChild(r.clear);
+        r.row->AddChild(r.learn);
+
+        r.volume = new BSlider(BRect(486, 2, 636, 30), "volume", nullptr,
+                               slotMessage(kMsgVolSlider, slot), 0, kSliderScale);
+        r.volume->SetModificationMessage(slotMessage(kMsgVolSlider, slot));
+        r.volume->SetViewColor(bg);
+        r.volume->SetLowColor(bg);
+        r.row->AddChild(r.volume);
+
+        if (slot >= kDefaultSlotCount)
+            r.row->Hide();
+        mRows->AddChild(r.row);
+    }
+
+    BHandler *mTarget;
+    BButton *mClose = nullptr;
+    BButton *mAdd = nullptr;
+    BButton *mRemove = nullptr;
+    BView *mRows = nullptr;
+    BScrollView *mScroll = nullptr;
+    Row mRow[kMaxSlots];
+    int mSlotCount = kDefaultSlotCount;
+};
+
+//------------------------------------------------------------------------
 // DrumKitView — the actual BView inside the host's parent view.
 //------------------------------------------------------------------------
 class DrumKitView : public BView
@@ -171,6 +409,7 @@ public:
         mLoadButton->SetTarget(this);
         mClearButton->SetTarget(this);
         mLearnButton->SetTarget(this);
+        mExpandButton->SetTarget(this);
 
         // Offscreen double buffer (falls back to direct drawing if refused).
         BRect b = Bounds();
@@ -229,8 +468,15 @@ public:
     {
         switch (message->what) {
             case kMsgVolSlider: {
-                Vst::ParamID id = (Vst::ParamID)(kSlotVolumeBase + selectedSlot());
-                Vst::ParamValue norm = (double)mVolSlider->Value() / (double)kSliderScale;
+                // From the strip (selected pad) or a rack row ("slot"); both
+                // carry the slider's own value. The controller pushes the
+                // change back through ParamChanged, which syncs the other one.
+                const int slot = messageSlot(message);
+                int32 raw = 0;
+                if (message->FindInt32("be:value", &raw) != B_OK)
+                    raw = mVolSlider->Value();
+                Vst::ParamID id = (Vst::ParamID)(kSlotVolumeBase + slot);
+                Vst::ParamValue norm = (double)raw / (double)kSliderScale;
                 mController->beginEdit(id);
                 mController->setParamNormalized(id, norm);
                 mController->performEdit(id, norm);
@@ -241,7 +487,7 @@ public:
                 if (!mFilePanel)
                     mFilePanel =
                         new BFilePanel(B_OPEN_PANEL, new BMessenger(this), nullptr, 0, false);
-                mLoadSlot = selectedSlot();
+                mLoadSlot = messageSlot(message);
                 mFilePanel->Show();
                 break;
             }
@@ -253,17 +499,21 @@ public:
                         mController->setSampleFile(mLoadSlot, path.Path()) != kResultOk)
                         fprintf(stderr, "DRUMku: setSampleFile failed for '%s'\n", path.Path());
                     RefreshStrip();
+                    RefreshRackRow(mLoadSlot);
                 }
                 break;
             }
             case kMsgClearBtn: {
-                if (mController->setSampleFile(selectedSlot(), "") != kResultOk)
+                const int slot = messageSlot(message);
+                if (mController->setSampleFile(slot, "") != kResultOk)
                     fprintf(stderr, "DRUMku: clearing the sample failed\n");
                 RefreshStrip();
+                RefreshRackRow(slot);
                 break;
             }
             case kMsgLearnBtn: {
-                int slot = selectedSlot();
+                const int slot = messageSlot(message);
+                const int previous = mArmedSlot;
                 if (mArmedSlot == slot) {
                     mController->armLearn(-1); // toggle off
                     mArmedSlot = -1;
@@ -273,9 +523,23 @@ public:
                     fprintf(stderr, "DRUMku: arming MIDI learn failed\n");
                 }
                 RefreshStrip();
+                RefreshRackRow(previous);
+                RefreshRackRow(slot);
                 Invalidate();
                 break;
             }
+            case kMsgExpand:
+                OpenRack();
+                break;
+            case kMsgRackClose:
+                CloseRack();
+                break;
+            case kMsgRackAdd:
+                SetSlotCount(SlotCount() + 1);
+                break;
+            case kMsgRackRemove:
+                SetSlotCount(SlotCount() - 1);
+                break;
             case kMsgTick: {
                 bool animating = mArmedSlot >= 0;
                 for (int i = 0; i < geo::kPadCount; ++i) {
@@ -319,16 +583,23 @@ public:
             }
             if (slot == selectedSlot())
                 RefreshStrip();
+            RefreshRackRow(slot);
             return;
         }
         if (id >= (Vst::ParamID)kSlotVolumeBase &&
             id < (Vst::ParamID)(kSlotVolumeBase + kMaxSlots)) {
-            if ((int)(id - kSlotVolumeBase) == selectedSlot()) {
+            const int slot = (int)(id - kSlotVolumeBase);
+            if (slot == selectedSlot()) {
                 int32 v = (int32)(value * kSliderScale + 0.5);
                 if (mVolSlider->Value() != v)
                     mVolSlider->SetValue(v);
             }
+            if (mRack)
+                mRack->SetVolume(slot, value);
+            return;
         }
+        if (id == (Vst::ParamID)kSlotCountId && mRack)
+            mRack->SetSlotCount(SlotCount());
     }
 
 private:
@@ -349,6 +620,90 @@ private:
     int selectedSlot() const
     {
         return geo::kPads[mSelected].slot;
+    }
+
+    // A rack row names its slot in the message; the strip acts on the
+    // selected pad's slot.
+    int messageSlot(const BMessage *message) const
+    {
+        int32 slot = -1;
+        if (message->FindInt32("slot", &slot) == B_OK && slot >= 0 && slot < kMaxSlots)
+            return (int)slot;
+        return selectedSlot();
+    }
+
+    // Rows the rack shows: kSlotCountId is a 1..kMaxSlots range parameter.
+    int SlotCount() const
+    {
+        double norm = mController->getParamNormalized((Vst::ParamID)kSlotCountId);
+        return 1 + (int)(norm * (double)(kMaxSlots - 1) + 0.5);
+    }
+
+    // Growing the rack only reveals rows: every slot already has its
+    // parameters, and the engine plays any slot with a sample and a bound
+    // note whether or not its row is shown.
+    void SetSlotCount(int count)
+    {
+        if (count < 1)
+            count = 1;
+        if (count > kMaxSlots)
+            count = kMaxSlots;
+        if (count == SlotCount())
+            return;
+        const Vst::ParamID id = (Vst::ParamID)kSlotCountId;
+        const double norm = (double)(count - 1) / (double)(kMaxSlots - 1);
+        mController->beginEdit(id);
+        mController->setParamNormalized(id, norm);
+        mController->performEdit(id, norm);
+        mController->endEdit(id);
+        if (mRack)
+            mRack->SetSlotCount(count); // ParamChanged may not echo an edit we made
+    }
+
+    // The rack is built on first use (it is 64 rows of controls) and then
+    // shown and hidden. While it is open it covers the whole editor, so the
+    // strip controls, its siblings, are hidden rather than overlapped.
+    void OpenRack()
+    {
+        if (!mRack) {
+            mRack = new DrumRackView(Bounds(), this);
+            AddChild(mRack);
+        } else if (mRack->IsHidden()) {
+            mRack->Show();
+        }
+        SetStripVisible(false);
+        mRack->SetSlotCount(SlotCount());
+        for (int i = 0; i < kMaxSlots; ++i)
+            RefreshRackRow(i);
+    }
+
+    void CloseRack()
+    {
+        if (mRack && !mRack->IsHidden())
+            mRack->Hide();
+        SetStripVisible(true);
+        RefreshStrip();
+        Invalidate();
+    }
+
+    void SetStripVisible(bool visible)
+    {
+        BView *strip[] = {mPadLabel,    mFileLabel,   mNoteLabel, mLoadButton,
+                          mClearButton, mLearnButton, mVolSlider, mExpandButton};
+        for (BView *v : strip) {
+            if (visible && v->IsHidden())
+                v->Show();
+            else if (!visible && !v->IsHidden())
+                v->Hide();
+        }
+    }
+
+    void RefreshRackRow(int slot)
+    {
+        if (!mRack || slot < 0 || slot >= kMaxSlots)
+            return;
+        const int pad = padForSlot(slot);
+        mRack->RefreshRow(slot, mController, mArmedSlot, pad >= 0 ? geo::kPads[pad].name : nullptr);
     }
 
     int padForSlot(int slot) const
@@ -388,6 +743,12 @@ private:
         mVolSlider->SetLowColor(kStripBg);
         mVolSlider->SetHighColor(kLabelColor);
         AddChild(mVolSlider);
+
+        // The nine pads reach slots 1-9 only; the rack reaches all of them.
+        mExpandButton =
+            new BButton(BRect(frame.Width() - 168, y0 + 86, frame.Width() - 16, y0 + 114), "expand",
+                        "Expand kit \xe2\x80\xba", new BMessage(kMsgExpand));
+        AddChild(mExpandButton);
     }
 
     void stripLabel(BStringView *label, rgb_color color)
@@ -561,6 +922,8 @@ private:
     BButton *mClearButton = nullptr;
     BButton *mLearnButton = nullptr;
     BSlider *mVolSlider = nullptr;
+    BButton *mExpandButton = nullptr;
+    DrumRackView *mRack = nullptr; // child view, built on first Expand
     BFilePanel *mFilePanel = nullptr;
     BMessageRunner *mTick = nullptr;
 
