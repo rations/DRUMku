@@ -1,5 +1,8 @@
 # DRUMku
 
+> **Users:** install the whole stack from the [JackDAW release](https://github.com/rations/jackDAW-haiku/releases)
+> (`sh install.sh`). This repository is the source of the `drumku` package.
+
 A native VST3 MIDI **drum sampler** for [Haiku](https://www.haiku-os.org/),
 written directly against the VST 3 SDK (no plug-in framework, no GUI toolkit).
 
