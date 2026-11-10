@@ -1,10 +1,12 @@
 name			drumku
-version			0.4.0-1
+version			0.5.0-1
 architecture	x86_64
-summary			"DRUMku - MIDI drum sampler VST3 plug-in (Haiku)"
-description		"A MIDI-triggered drum sampler as a native VST3 plug-in: loads WAV
-samples per pad and plays them from incoming MIDI notes. The Steinberg VST3 SDK is
-linked statically (MIT). Install alongside a VST3 host such as JackDAW."
+summary			"DRUMku - MIDI drum sampler: VST3 plug-in and standalone app (RenkuOS)"
+description		"A MIDI-triggered drum sampler: a rack of pads, each playing a WAV
+sample from incoming MIDI notes (a drum kit, a keyboard or a sequencer). As a
+native VST3 plug-in for hosts such as Kasen, and as the standalone DRUMku app
+(Applications menu), which plays on the Media Kit or, with the jack package
+installed, on JACK. The Steinberg VST3 SDK is linked statically (MIT)."
 packager		"rations <ehqcar@proton.me>"
 vendor			"rations"
 copyrights {
@@ -15,10 +17,11 @@ licenses {
 	"MIT"
 }
 provides {
-	drumku = 0.4.0
+	drumku = 0.5.0
+	app:DRUMku = 0.5.0
 }
 requires {
-	haiku
+	haiku >= @HAIKU_MIN@
 }
 urls {
 	"https://github.com/rations/DRUMku"

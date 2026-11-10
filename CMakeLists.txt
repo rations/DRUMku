@@ -9,7 +9,7 @@
 cmake_minimum_required(VERSION 3.25.0)
 
 project(smtg-drumku
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "DRUMku MIDI drum sampler VST3 for Haiku"
 )
 
@@ -29,6 +29,10 @@ if(NOT TARGET sdk)
     set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "plug-in examples not needed" FORCE)
     set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "run manually instead" FORCE)
     set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "install manually instead" FORCE)
+
+    # The audio backends the standalone app plays on, defined before the SDK
+    # (its audiohost sample looks for them too).
+    include(${VST3_SDK_DIR}/../haiku/jdbackend.cmake OPTIONAL)
 
     add_subdirectory(${VST3_SDK_DIR} vst3sdk)
 
@@ -95,3 +99,63 @@ target_link_libraries(DRUMku
         tracker # BFilePanel
         translation
 )
+
+# ---------------------------------------------------------------------------
+# The standalone app: DRUMku without a DAW, played from MIDI sources on the
+# Media Kit or on JACK. It hosts the DRUMku.vst3 bundle built above through the
+# SDK audiohost's AudioClient on JackDAW's audio backends (VST3-renku's
+# haiku/jdbackend): the Media Kit built in, JACK as the jack.so add-on, so it
+# never links libjack.
+# ---------------------------------------------------------------------------
+if(HAIKU)
+    include("${DRUMKU_HAIKU_SUPPORT_DIR}/jdbackend.cmake")
+    set(DRUMKU_SDK_DIR "${DRUMKU_HAIKU_SUPPORT_DIR}/../vst3sdk")
+    set(DRUMKU_AUDIOHOST_DIR "${DRUMKU_SDK_DIR}/public.sdk/samples/vst-hosting/audiohost")
+
+    add_executable(DRUMkuApp
+        standalone/main.cpp
+        standalone/mainwindow.cpp
+        standalone/pluginhost.cpp
+        standalone/settings.cpp
+        ${DRUMKU_AUDIOHOST_DIR}/source/media/audioclient.cpp
+        ${DRUMKU_AUDIOHOST_DIR}/source/media/jdbackend/jdbackendclient.cpp
+        ${DRUMKU_SDK_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
+        ${DRUMKU_SDK_DIR}/public.sdk/source/vst/hosting/module_haiku.cpp
+        ${DRUMKU_SDK_DIR}/public.sdk/source/common/memorystream.cpp
+    )
+    target_compile_features(DRUMkuApp PRIVATE cxx_std_17)
+    # Warnings for our own files; the SDK's are built as the SDK builds them.
+    set_source_files_properties(
+        standalone/main.cpp standalone/mainwindow.cpp standalone/pluginhost.cpp
+        standalone/settings.cpp
+        PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra")
+    target_include_directories(DRUMkuApp PRIVATE ${DRUMKU_SDK_DIR} source)
+    target_link_libraries(DRUMkuApp PRIVATE sdk_hosting jdbackend be)
+    set_target_properties(DRUMkuApp
+        PROPERTIES
+            OUTPUT_NAME DRUMku
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>
+    )
+    # The bundle it hosts, and the JACK add-on it can load.
+    add_dependencies(DRUMkuApp DRUMku)
+    if(TARGET jdbackend_jack)
+        add_dependencies(DRUMkuApp jdbackend_jack)
+    endif()
+
+    # Signature, launch flags, version and icon, so Tracker and Deskbar treat
+    # it as an application.
+    set(DRUMKU_RSRC ${CMAKE_CURRENT_BINARY_DIR}/DRUMku.rsrc)
+    add_custom_command(OUTPUT ${DRUMKU_RSRC}
+        COMMAND rc -I ${CMAKE_CURRENT_SOURCE_DIR}/standalone -o ${DRUMKU_RSRC}
+                ${CMAKE_CURRENT_SOURCE_DIR}/standalone/DRUMku.rdef
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/standalone/DRUMku.rdef
+                ${CMAKE_CURRENT_SOURCE_DIR}/standalone/icons/drumku_icon.rdef
+        COMMENT "Compiling the DRUMku app resources"
+    )
+    add_custom_target(DRUMkuAppResources DEPENDS ${DRUMKU_RSRC})
+    add_dependencies(DRUMkuApp DRUMkuAppResources)
+    add_custom_command(TARGET DRUMkuApp POST_BUILD
+        COMMAND xres -o $<TARGET_FILE:DRUMkuApp> ${DRUMKU_RSRC}
+        COMMAND mimeset -f $<TARGET_FILE:DRUMkuApp>
+    )
+endif()

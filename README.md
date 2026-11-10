@@ -1,8 +1,7 @@
 # DRUMku
 
-> This repository is the source of the `drumku` package, part of the
-> [JackDAW stack](https://github.com/rations/jackDAW-renku) for RenkuOS. The 0.5
-> release's `install.sh` is for Haiku hrev60256; there is no RenkuOS release yet.
+> This repository is the source of the `drumku` package for RenkuOS: the
+> DRUMku VST3 plug-in and the standalone DRUMku app.
 
 A native VST3 MIDI **drum sampler** for [RenkuOS](https://github.com/RenkuOS) (a Haiku fork),
 written directly against the VST 3 SDK (no plug-in framework, no GUI toolkit).
@@ -13,11 +12,31 @@ from an electronic drum kit over JACK) trigger the sample(s) bound to that
 pitch. Samples are resampled to the engine's sample rate when loaded, so a
 44.1 kHz sample plays correctly in a 48 kHz session.
 
-Because no VST3 plug-in ships a usable editor on RenkuOS, DRUMku exposes
-everything as VST3 parameters (per-slot volume and note) plus a small
-`IDrumLoader` interface for the per-slot sample path. A host such as
-[JackDAW](https://github.com/rations/jackDAW-renku) renders the rack — a Load button,
-volume slider, and Learn checkbox per row — in its own effects window.
+DRUMku has its own native editor (the pads, a Load button, volume and MIDI
+Learn per slot). It also exposes everything as VST3 parameters (per-slot volume
+and note) plus a small `IDrumLoader` interface for the per-slot sample path, so
+a host that cannot show the editor can still drive the rack.
+
+## Standalone app
+
+`DRUMku` (Applications in the Deskbar) plays DRUMku without a DAW: one window
+with DRUMku's own editor, **Audio** and **MIDI** menus and a status line.
+
+- **Audio ▸ Media Kit / JACK** picks the audio system. The Media Kit is built
+  in: DRUMku becomes one media node (Cortex shows it) whose output goes to the
+  system mixer. JACK uses Kasen's JACK backend, loaded from the
+  `add-ons/DRUMku/jack.so` add-on only when chosen, so the app runs without the
+  jack package. If JACK is not running, the app says so and stays on the Media
+  Kit.
+- **MIDI** lists the MIDI sources (a drum kit, a keyboard, a sequencer); tick
+  the ones that should play DRUMku, several at once if you like. On the first
+  run every source is connected, so a kit that is plugged in just plays. On the
+  Media Kit DRUMku's input is the Midi Kit endpoint "DRUMku MIDI in 1", which
+  PatchBay can connect too.
+- The status line shows the audio system, rate, buffer size, late cycles and
+  the connected MIDI sources.
+- Samples, notes, volumes, the audio system, the MIDI sources and the window
+  position are restored on the next start (`~/config/settings/DRUMku`).
 
 ## Building
 
@@ -25,7 +44,8 @@ The build system is CMake + Ninja against the [VST3-renku](https://github.com/ra
 On the RenkuOS machine, with the SDK checkout as a sibling directory:
 
 ```
-make            # configure + build (build/VST3/Release/DRUMku.vst3)
+make            # configure + build (build/VST3/Release/DRUMku.vst3 and
+                # the app, build/bin/Release/DRUMku)
 make install    # copy the bundle into ~/config/non-packaged/add-ons/media/VST3/
 make validate   # run the SDK validator against the installed bundle
 ```
@@ -36,10 +56,12 @@ Point the build at a specific SDK with `-DVST3_SDK_DIR=<path>` (default
 ## Install / packaging (RenkuOS)
 
 - From source: `./build-from-source.sh` (installs `DRUMku.vst3` to
-  `~/config/non-packaged/add-ons/media/VST3`).
-- Prebuilt package: `packaging/make-hpkg.sh` → `drumku-0.1.0-1-x86_64.hpkg`
-  (`pkgman install ./drumku-*.hpkg`). HaikuPorts recipe: `packaging/drumku-0.1.0.recipe`.
-- See the [stack overview](https://github.com/rations/jackDAW-renku/blob/master/STACK.md).
+  `~/config/non-packaged/add-ons/media/VST3` and the app to
+  `~/config/non-packaged/apps`).
+- Package: `packaging/make-hpkg.sh` → `drumku-0.5.0-1-x86_64.hpkg`
+  (`pkgman install ./drumku-*.hpkg`).
+- The app icon is drawn by `tools/make_icon.py` (`standalone/icons/drumku.hvif`
+  opens in Icon-O-Matic).
 
 ## Licence
 
