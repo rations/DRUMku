@@ -15,6 +15,7 @@
 #include <Message.h>
 #include <Window.h>
 
+class BFilePanel;
 class BMenu;
 class BMenuItem;
 class BMessageRunner;
@@ -57,6 +58,8 @@ private:
     void SaveMidiChoice();
     void UpdateMenus();
     void UpdateStatus();
+    void ShowPresetPanel(bool save);
+    void PresetChosen(BMessage *message, bool save);
     void FitToEditor(float width, float height);
     void DetachEditor();
 
@@ -70,6 +73,8 @@ private:
     BMenuItem *fJackItem = nullptr;
     BMessageRunner *fMeterPump = nullptr;
     BMessageRunner *fStatusPump = nullptr;
+    BFilePanel *fOpenPanel = nullptr;
+    BFilePanel *fSavePanel = nullptr;
     float fMenuHeight = 0;
     float fStatusHeight = 0;
 };

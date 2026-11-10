@@ -62,7 +62,15 @@ public:
 
     // Plug-in state (processor + controller), as a DAW saves it in a project.
     bool getState(std::vector<char> &component, std::vector<char> &controller);
-    void setState(const std::vector<char> &component, const std::vector<char> &controller);
+    // False if the plug-in refused the component state.
+    bool setState(const std::vector<char> &component, const std::vector<char> &controller);
+
+    // Presets: the whole state in a .kasenpreset file, the format Kasen's
+    // effects window uses, so presets move between the app and Kasen. The
+    // app reads and writes them itself; Kasen does not need to be installed.
+    // False, with a message for the user, on failure.
+    bool savePreset(const char *path, std::string &error);
+    bool loadPreset(const char *path, std::string &error);
 
     Steinberg::Vst::IEditController *controller() const
     {
@@ -103,6 +111,7 @@ private:
     Steinberg::Vst::IEditController *fController = nullptr;
     Steinberg::Vst::IMidiMapping *fMidiMapping = nullptr;
     Steinberg::Vst::AudioClientPtr fAudio;
+    char fClassID[16] = {}; // the plug-in's VST3 class ID, a preset's identity
     std::string fBackend = "mediakit";
 };
 

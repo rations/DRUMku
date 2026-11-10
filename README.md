@@ -20,11 +20,12 @@ a host that cannot show the editor can still drive the rack.
 ## Standalone app
 
 `DRUMku` (Applications in the Deskbar) plays DRUMku without a DAW: one window
-with DRUMku's own editor, **Audio** and **MIDI** menus and a status line.
+with DRUMku's own editor, **DRUMku**, **Audio** and **MIDI** menus and a status
+line.
 
 - **Audio ▸ Media Kit / JACK** picks the audio system. The Media Kit is built
   in: DRUMku becomes one media node (Cortex shows it) whose output goes to the
-  system mixer. JACK uses Kasen's JACK backend, loaded from the
+  sound card's first two playback channels. JACK uses Kasen's JACK backend, loaded from the
   `add-ons/DRUMku/jack.so` add-on only when chosen, so the app runs without the
   jack package. If JACK is not running, the app says so and stays on the Media
   Kit.
@@ -37,6 +38,11 @@ with DRUMku's own editor, **Audio** and **MIDI** menus and a status line.
   the connected MIDI sources.
 - Samples, notes, volumes, the audio system, the MIDI sources and the window
   position are restored on the next start (`~/config/settings/DRUMku`).
+- **DRUMku ▸ Save preset… / Open preset…** keep whole kits in `.kasenpreset`
+  files (first offered in `~/config/settings/DRUMku/presets`). They are the
+  presets Kasen's effects window saves and opens, so a kit moves between the
+  app and Kasen either way; the app reads and writes them itself and does not
+  need Kasen. A preset stores where the samples are, not the samples.
 
 ## Building
 

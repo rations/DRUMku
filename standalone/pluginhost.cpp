@@ -8,7 +8,13 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstmessage.h"
 
+#include <ByteOrder.h>
+#include <Entry.h>
+#include <File.h>
+
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 using namespace Steinberg;
 
@@ -90,8 +96,10 @@ bool PluginHost::load(const std::string &bundlePath, std::string &error)
         if (classInfo.category() != kVstAudioEffectClass)
             continue;
         fProvider = owned(new Provider(factory, classInfo, true));
-        if (fProvider->initialize())
+        if (fProvider->initialize()) {
+            memcpy(fClassID, classInfo.ID().data(), sizeof fClassID);
             break;
+        }
         fProvider = nullptr;
     }
     if (!fProvider) {
@@ -221,7 +229,7 @@ bool PluginHost::getState(std::vector<char> &component, std::vector<char> &contr
 }
 
 //------------------------------------------------------------------------
-void PluginHost::setState(const std::vector<char> &component, const std::vector<char> &controller)
+bool PluginHost::setState(const std::vector<char> &component, const std::vector<char> &controller)
 {
     // The order a DAW uses on project load: the processor takes its state,
     // the controller mirrors it, then takes its own.
@@ -230,7 +238,7 @@ void PluginHost::setState(const std::vector<char> &component, const std::vector<
                             static_cast<TSize>(component.size()));
         if (fComponent->setState(&stream) != kResultOk) {
             fprintf(stderr, "DRUMku: the saved plug-in state was refused\n");
-            return;
+            return false;
         }
         int64 pos = 0;
         stream.seek(0, IBStream::kIBSeekSet, &pos);
@@ -241,6 +249,143 @@ void PluginHost::setState(const std::vector<char> &component, const std::vector<
                             static_cast<TSize>(controller.size()));
         fController->setState(&stream);
     }
+    return true;
+}
+
+//------------------------------------------------------------------------
+// The .kasenpreset format, as Kasen writes it (pluginhost_preset_save in
+// Kasen's src/host/pluginhost.cpp); keep the two the same:
+//   [0]   8  magic "JDPRESET"
+//   [8]   4  format version, uint32 little-endian: 1
+//   [12] 16  the plug-in's VST3 class ID (a preset for another plug-in is
+//            refused)
+//   [28]  4  component state length C, int32 little-endian
+//   [32]  4  controller state length E, int32 little-endian
+//   [36]  C  component state, then E bytes of controller state
+namespace
+{
+const char kPresetMagic[8] = {'J', 'D', 'P', 'R', 'E', 'S', 'E', 'T'};
+const uint32 kPresetVersion = 1;
+const size_t kPresetHeader = 8 + 4 + 16;
+const off_t kPresetMaxSize = 64 * 1024 * 1024; // a preset is untrusted input
+
+void PutLE32(std::vector<char> &out, uint32 value)
+{
+    value = B_HOST_TO_LENDIAN_INT32(value);
+    const char *bytes = reinterpret_cast<const char *>(&value);
+    out.insert(out.end(), bytes, bytes + 4);
+}
+
+uint32 GetLE32(const char *bytes)
+{
+    uint32 value;
+    memcpy(&value, bytes, 4);
+    return B_LENDIAN_TO_HOST_INT32(value);
+}
+} // namespace
+
+//------------------------------------------------------------------------
+bool PluginHost::savePreset(const char *path, std::string &error)
+{
+    std::vector<char> component, controller;
+    if (!getState(component, controller)) {
+        error = "The plug-in did not hand over its state.";
+        return false;
+    }
+    if (component.size() > INT32_MAX || controller.size() > INT32_MAX) {
+        error = "The plug-in's state is too large for a preset.";
+        return false;
+    }
+    std::vector<char> data;
+    data.reserve(kPresetHeader + 8 + component.size() + controller.size());
+    data.insert(data.end(), kPresetMagic, kPresetMagic + sizeof kPresetMagic);
+    PutLE32(data, kPresetVersion);
+    data.insert(data.end(), fClassID, fClassID + sizeof fClassID);
+    PutLE32(data, static_cast<uint32>(component.size()));
+    PutLE32(data, static_cast<uint32>(controller.size()));
+    data.insert(data.end(), component.begin(), component.end());
+    data.insert(data.end(), controller.begin(), controller.end());
+
+    // Written next to the target and renamed over it, so a failed save never
+    // leaves half a preset (or half of an older one).
+    const std::string part = std::string(path) + ".part";
+    BFile file;
+    status_t status = file.SetTo(part.c_str(), B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+    if (status == B_OK) {
+        ssize_t written = file.Write(data.data(), data.size());
+        if (written < 0)
+            status = static_cast<status_t>(written);
+        else if (static_cast<size_t>(written) != data.size())
+            status = B_IO_ERROR;
+        else
+            status = file.Sync();
+        file.Unset();
+    }
+    if (status == B_OK) {
+        BEntry entry(part.c_str());
+        status = entry.InitCheck();
+        if (status == B_OK)
+            status = entry.Rename(path, true);
+    }
+    if (status != B_OK) {
+        BEntry(part.c_str()).Remove();
+        error = std::string("Could not save ") + path + ": " + strerror(status);
+        return false;
+    }
+    return true;
+}
+
+//------------------------------------------------------------------------
+bool PluginHost::loadPreset(const char *path, std::string &error)
+{
+    BFile file(path, B_READ_ONLY);
+    off_t size = 0;
+    status_t status = file.InitCheck();
+    if (status == B_OK)
+        status = file.GetSize(&size);
+    if (status != B_OK) {
+        error = std::string("Could not open ") + path + ": " + strerror(status);
+        return false;
+    }
+    if (size < static_cast<off_t>(kPresetHeader + 8) || size > kPresetMaxSize) {
+        error = std::string(path) + " is not a preset.";
+        return false;
+    }
+    std::vector<char> data(static_cast<size_t>(size));
+    ssize_t got = file.ReadAt(0, data.data(), data.size());
+    if (got != static_cast<ssize_t>(data.size())) {
+        error = std::string("Could not read ") + path + ".";
+        return false;
+    }
+    const char *p = data.data();
+    if (memcmp(p, kPresetMagic, sizeof kPresetMagic) != 0) {
+        error = std::string(path) + " is not a preset.";
+        return false;
+    }
+    if (GetLE32(p + 8) != kPresetVersion) {
+        error = std::string(path) + " was saved by a newer version.";
+        return false;
+    }
+    if (memcmp(p + 12, fClassID, sizeof fClassID) != 0) {
+        error = std::string(path) + " is a preset for a different plug-in.";
+        return false;
+    }
+    const uint32 componentSize = GetLE32(p + kPresetHeader);
+    const uint32 controllerSize = GetLE32(p + kPresetHeader + 4);
+    const uint64_t body = data.size() - (kPresetHeader + 8);
+    if (componentSize > INT32_MAX || controllerSize > INT32_MAX ||
+        static_cast<uint64_t>(componentSize) + controllerSize > body) {
+        error = std::string(path) + " is damaged.";
+        return false;
+    }
+    const char *state = p + kPresetHeader + 8;
+    std::vector<char> component(state, state + componentSize);
+    std::vector<char> controller(state + componentSize, state + componentSize + controllerSize);
+    if (!setState(component, controller)) {
+        error = std::string("The plug-in refused ") + path + ".";
+        return false;
+    }
+    return true;
 }
 
 //------------------------------------------------------------------------

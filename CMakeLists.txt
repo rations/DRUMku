@@ -130,7 +130,8 @@ if(HAIKU)
         standalone/settings.cpp
         PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra")
     target_include_directories(DRUMkuApp PRIVATE ${DRUMKU_SDK_DIR} source)
-    target_link_libraries(DRUMkuApp PRIVATE sdk_hosting jdbackend be)
+    # tracker: BFilePanel (the preset open/save panels).
+    target_link_libraries(DRUMkuApp PRIVATE sdk_hosting jdbackend be tracker)
     set_target_properties(DRUMkuApp
         PROPERTIES
             OUTPUT_NAME DRUMku

@@ -9,10 +9,15 @@
 
 #include <Alert.h>
 #include <Application.h>
+#include <Directory.h>
+#include <Entry.h>
+#include <FilePanel.h>
+#include <FindDirectory.h>
 #include <Menu.h>
 #include <MenuBar.h>
 #include <MenuItem.h>
 #include <MessageRunner.h>
+#include <Path.h>
 #include <String.h>
 #include <StringView.h>
 #include <View.h>
@@ -36,7 +41,14 @@ enum : uint32 {
     kMsgMeters = 'dkMt',    // pump the output parameters into the controller
     kMsgStatus = 'dkSt',    // refresh the status line
     kMsgAudioInfo = 'dkAI', // show the audio status in an alert
+    kMsgOpenPreset = 'dkPo', // show the open panel
+    kMsgSavePreset = 'dkPs', // show the save panel
+    kMsgPresetOpened = 'dkPO', // "refs": the preset to load
+    kMsgPresetSaved = 'dkPS',  // "directory" + "name": where to save
 };
+
+// The preset file name extension (Kasen's effects window uses it too).
+const char *kPresetExtension = ".kasenpreset";
 
 // The editor's size if it cannot say (DRUMku's is 760 x 480).
 const float kDefaultWidth = 760;
@@ -63,6 +75,9 @@ MainWindow::MainWindow(PluginHost *host, const BMessage &settings)
     BMenuBar *bar = new BMenuBar(BRect(0, 0, kDefaultWidth - 1, 0), "menu");
     BMenu *app = new BMenu("DRUMku");
     app->AddItem(new BMenuItem("About DRUMku" B_UTF8_ELLIPSIS, new BMessage(B_ABOUT_REQUESTED)));
+    app->AddSeparatorItem();
+    app->AddItem(new BMenuItem("Open preset" B_UTF8_ELLIPSIS, new BMessage(kMsgOpenPreset), 'O'));
+    app->AddItem(new BMenuItem("Save preset" B_UTF8_ELLIPSIS, new BMessage(kMsgSavePreset), 'S'));
     app->AddSeparatorItem();
     app->AddItem(new BMenuItem("Quit", new BMessage(B_QUIT_REQUESTED), 'Q'));
     app->SetTargetForItems(this);
@@ -145,6 +160,8 @@ MainWindow::MainWindow(PluginHost *host, const BMessage &settings)
 //------------------------------------------------------------------------
 MainWindow::~MainWindow()
 {
+    delete fOpenPanel;
+    delete fSavePanel;
     delete fMeterPump;
     delete fStatusPump;
     DetachEditor();
@@ -287,6 +304,70 @@ void MainWindow::MenusBeginning()
 }
 
 //------------------------------------------------------------------------
+void MainWindow::ShowPresetPanel(bool save)
+{
+    BFilePanel *&panel = save ? fSavePanel : fOpenPanel;
+    if (!panel) {
+        BMessenger target(this);
+        BMessage message(save ? kMsgPresetSaved : kMsgPresetOpened);
+        panel = new BFilePanel(save ? B_SAVE_PANEL : B_OPEN_PANEL, &target, nullptr, B_FILE_NODE,
+                               false, &message);
+        panel->Window()->SetTitle(save ? "DRUMku: Save preset" : "DRUMku: Open preset");
+        // The folder last used for presets, else ~/config/settings/DRUMku/presets.
+        const char *dir = fSettings.GetString("presetDir", nullptr);
+        BPath path;
+        if (dir) {
+            panel->SetPanelDirectory(dir);
+        } else if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK &&
+                   path.Append("DRUMku/presets") == B_OK &&
+                   create_directory(path.Path(), 0755) == B_OK) {
+            panel->SetPanelDirectory(path.Path());
+        }
+        if (save) {
+            BString name("DRUMku");
+            name << kPresetExtension;
+            panel->SetSaveText(name.String());
+        }
+    }
+    panel->Show();
+}
+
+//------------------------------------------------------------------------
+void MainWindow::PresetChosen(BMessage *message, bool save)
+{
+    BPath path;
+    if (save) {
+        entry_ref dir;
+        const char *name = nullptr;
+        if (message->FindRef("directory", &dir) != B_OK ||
+            message->FindString("name", &name) != B_OK || !name)
+            return;
+        BString file(name);
+        if (!file.EndsWith(kPresetExtension))
+            file << kPresetExtension;
+        if (path.SetTo(&dir) != B_OK || path.Append(file.String()) != B_OK)
+            return;
+    } else {
+        entry_ref ref;
+        if (message->FindRef("refs", &ref) != B_OK || path.SetTo(&ref) != B_OK)
+            return;
+    }
+    std::string error;
+    const bool ok = save ? fHost->savePreset(path.Path(), error)
+                         : fHost->loadPreset(path.Path(), error);
+    if (!ok) {
+        Tell(save ? "Save preset" : "Open preset", error);
+        return;
+    }
+    BPath parent;
+    if (path.GetParent(&parent) == B_OK)
+        fSettings.SetString("presetDir", parent.Path());
+    BString title("DRUMku: ");
+    title << path.Leaf();
+    SetTitle(title.String());
+}
+
+//------------------------------------------------------------------------
 void MainWindow::UpdateStatus()
 {
     fStatus->SetText(fHost->statusLine().c_str());
@@ -349,6 +430,18 @@ void MainWindow::MessageReceived(BMessage *message)
             break;
         case kMsgAudioInfo:
             Tell("Audio status", fHost->statusLine());
+            break;
+        case kMsgOpenPreset:
+            ShowPresetPanel(false);
+            break;
+        case kMsgSavePreset:
+            ShowPresetPanel(true);
+            break;
+        case kMsgPresetOpened:
+            PresetChosen(message, false);
+            break;
+        case kMsgPresetSaved:
+            PresetChosen(message, true);
             break;
         case B_ABOUT_REQUESTED:
             be_app->PostMessage(B_ABOUT_REQUESTED);
