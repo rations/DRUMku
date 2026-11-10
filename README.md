@@ -1,9 +1,11 @@
 # DRUMku
 
 > This repository is the source of the `drumku` package for RenkuOS: the
-> DRUMku VST3 plug-in and the standalone DRUMku app.
+> DRUMku VST3 plug-in and the standalone DRUMku app. Built packages are on the
+> [Releases](https://github.com/rations/DRUMku/releases) page, and
+> [renku-audio](https://github.com/rations/renku-audio) lists the whole audio stack.
 
-A native VST3 MIDI **drum sampler** for [RenkuOS](https://github.com/RenkuOS) (a Haiku fork),
+A native VST3 MIDI **drum sampler** for [RenkuOS](https://github.com/RenkuOS),
 written directly against the VST 3 SDK (no plug-in framework, no GUI toolkit).
 
 DRUMku is a drum **rack** of loader slots. Each slot loads one `.wav` sample,
@@ -66,7 +68,7 @@ Point the build at a specific SDK with `-DVST3_SDK_DIR=<path>` (default
 - From source: `./build-from-source.sh` (installs `DRUMku.vst3` to
   `~/config/non-packaged/add-ons/media/VST3` and the app to
   `~/config/non-packaged/apps`).
-- Package: `packaging/make-hpkg.sh` → `drumku-0.5.0-1-x86_64.hpkg`
+- Package: `packaging/make-hpkg.sh` → `drumku-0.5.0-4-x86_64.hpkg`
   (`pkgman install ./drumku-*.hpkg`).
 - The app icon is drawn by `tools/make_icon.py` (`standalone/icons/drumku.hvif`
   opens in Icon-O-Matic).
