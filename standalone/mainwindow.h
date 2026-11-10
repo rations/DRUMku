@@ -6,13 +6,16 @@
 // all run here. A ~30 Hz BMessageRunner moves the audio thread's output
 // parameters (AudioClient's lock-free transfer: pad activity and MIDI-learned
 // notes) into the controller, which flashes the editor's pads; a 1 s one
-// refreshes the status line.
+// refreshes the status line and reconnects chosen MIDI sources that have
+// been plugged back in.
 
 #pragma once
 
 #include "pluginterfaces/gui/iplugview.h"
 
 #include <Message.h>
+#include <set>
+#include <string>
 #include <Window.h>
 
 class BFilePanel;
@@ -55,6 +58,7 @@ public:
 private:
     void StartAudio(const char *backend, bool tellUser);
     void ToggleMidi(const char *source);
+    void CheckMidi();
     void SaveMidiChoice();
     void UpdateMenus();
     void UpdateStatus();
@@ -75,6 +79,10 @@ private:
     BMessageRunner *fStatusPump = nullptr;
     BFilePanel *fOpenPanel = nullptr;
     BFilePanel *fSavePanel = nullptr;
+    // The MIDI sources chosen on this backend, plugged in or not, and the
+    // ones that were there at the last CheckMidi.
+    std::set<std::string> fWantedMidi;
+    std::set<std::string> fSeenMidi;
     float fMenuHeight = 0;
     float fStatusHeight = 0;
 };

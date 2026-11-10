@@ -1,5 +1,5 @@
 name			drumku
-version			0.5.0-3
+version			0.5.0-4
 architecture	x86_64
 summary			"DRUMku - MIDI drum sampler: VST3 plug-in and standalone app (RenkuOS)"
 description		"A MIDI-triggered drum sampler: a rack of pads, each playing a WAV

@@ -31,7 +31,9 @@ line.
   Kit.
 - **MIDI** lists the MIDI sources (a drum kit, a keyboard, a sequencer); tick
   the ones that should play DRUMku, several at once if you like. On the first
-  run every source is connected, so a kit that is plugged in just plays. On the
+  run every source is connected, so a kit that is plugged in just plays. A
+  ticked source that is unplugged stays ticked and is connected again within a
+  second of being plugged back in. On the
   Media Kit DRUMku's input is the Midi Kit endpoint "DRUMku MIDI in 1", which
   PatchBay can connect too.
 - The status line shows the audio system, rate, buffer size, late cycles and

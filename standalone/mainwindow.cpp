@@ -22,8 +22,10 @@
 #include <StringView.h>
 #include <View.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -194,6 +196,11 @@ void MainWindow::DetachEditor()
 //------------------------------------------------------------------------
 void MainWindow::StartAudio(const char *backend, bool tellUser)
 {
+    // The choice on the backend being left, before it stops.
+    if (fHost->audioRunning()) {
+        CheckMidi();
+        SaveMidiChoice();
+    }
     std::string error;
     if (!fHost->startAudio(backend, error)) {
         // JACK not running (or not installed): fall back to the Media Kit so
@@ -209,26 +216,22 @@ void MainWindow::StartAudio(const char *backend, bool tellUser)
     }
     fSettings.SetString("backend", fHost->backend().c_str());
 
-    // The MIDI sources last chosen on this backend that are still there; on
-    // a first run (nothing saved) every source, so a plugged-in kit plays.
+    // The MIDI sources last chosen on this backend; on a first run (nothing
+    // saved) every source, so a plugged-in kit plays. The ones there now are
+    // connected; the others are connected when they appear (CheckMidi).
+    fWantedMidi.clear();
+    fSeenMidi.clear();
     if (fHost->audioRunning()) {
         BString key("midi:");
         key << fHost->backend().c_str();
-        const std::vector<std::string> sources = fHost->midiSources();
         const bool chosen = fSettings.HasString(key.String()) || fSettings.HasBool(key.String());
-        for (const auto &source : sources) {
-            bool wanted = !chosen;
-            const char *saved = nullptr;
-            for (int32 i = 0; fSettings.FindString(key.String(), i, &saved) == B_OK; i++) {
-                if (source == saved) {
-                    wanted = true;
-                    break;
-                }
-            }
-            std::string midiError;
-            if (wanted && !fHost->setMidiSource(source, true, midiError))
-                fprintf(stderr, "DRUMku: %s\n", midiError.c_str());
-        }
+        const char *saved = nullptr;
+        for (int32 i = 0; fSettings.FindString(key.String(), i, &saved) == B_OK; i++)
+            fWantedMidi.insert(saved);
+        if (!chosen)
+            for (const auto &source : fHost->midiSources())
+                fWantedMidi.insert(source);
+        CheckMidi();
     }
     UpdateMenus();
     UpdateStatus();
@@ -237,28 +240,63 @@ void MainWindow::StartAudio(const char *backend, bool tellUser)
 //------------------------------------------------------------------------
 void MainWindow::ToggleMidi(const char *source)
 {
-    bool connected = false;
-    for (const auto &s : fHost->connectedMidi())
-        connected = connected || s == source;
+    const std::vector<std::string> connected = fHost->connectedMidi();
+    const bool on = std::find(connected.begin(), connected.end(), source) == connected.end();
     std::string error;
-    if (!fHost->setMidiSource(source, !connected, error))
+    if (!fHost->setMidiSource(source, on, error))
         Tell("MIDI", error);
+    if (on)
+        fWantedMidi.insert(source);
+    else
+        fWantedMidi.erase(source);
     SaveMidiChoice();
     UpdateStatus();
 }
 
 //------------------------------------------------------------------------
+void MainWindow::CheckMidi()
+{
+    // Called once a second. A chosen source that has just appeared (a kit
+    // plugged back in, or present when audio starts) is connected. A source
+    // that stays plugged in follows its real connection, so a patchbay
+    // (dis)connection is remembered and not undone here. A chosen source that
+    // is unplugged stays chosen, so it is reconnected when it comes back.
+    if (!fHost->audioRunning())
+        return;
+    const std::vector<std::string> sources = fHost->midiSources();
+    std::set<std::string> present(sources.begin(), sources.end());
+    std::set<std::string> failed;
+    for (const auto &source : sources) {
+        if (fSeenMidi.count(source) || !fWantedMidi.count(source))
+            continue;
+        std::string error;
+        if (!fHost->setMidiSource(source, true, error)) {
+            fprintf(stderr, "DRUMku: %s\n", error.c_str());
+            failed.insert(source); // tried again next second
+        }
+    }
+    const std::vector<std::string> connected = fHost->connectedMidi();
+    std::set<std::string> wanted(connected.begin(), connected.end());
+    for (const auto &source : fWantedMidi)
+        if (!present.count(source) || failed.count(source) || !fSeenMidi.count(source))
+            wanted.insert(source);
+    fWantedMidi.swap(wanted);
+    for (const auto &source : failed)
+        present.erase(source);
+    fSeenMidi.swap(present);
+}
+
+//------------------------------------------------------------------------
 void MainWindow::SaveMidiChoice()
 {
-    // The connected sources, per backend. A bool marks "chosen, and none"
-    // so an empty choice is not taken for a first run.
+    // The chosen sources, per backend, plugged in or not. A bool marks
+    // "chosen, and none" so an empty choice is not taken for a first run.
     BString key("midi:");
     key << fHost->backend().c_str();
     fSettings.RemoveName(key.String());
-    const std::vector<std::string> connected = fHost->connectedMidi();
-    if (connected.empty())
+    if (fWantedMidi.empty())
         fSettings.AddBool(key.String(), false);
-    for (const auto &source : connected)
+    for (const auto &source : fWantedMidi)
         fSettings.AddString(key.String(), source.c_str());
 }
 
@@ -388,8 +426,10 @@ bool MainWindow::QuitRequested()
     }
     // The MIDI sources as they are now, so ones (dis)connected in a patchbay
     // since the last menu change are remembered too.
-    if (fHost->audioRunning())
+    if (fHost->audioRunning()) {
+        CheckMidi();
         SaveMidiChoice();
+    }
     fSettings.SetRect("frame", Frame());
     if (SaveSettings(fSettings) != B_OK)
         fprintf(stderr, "DRUMku: could not save the settings\n");
@@ -417,6 +457,7 @@ void MainWindow::MessageReceived(BMessage *message)
             break;
         }
         case kMsgStatus:
+            CheckMidi();
             UpdateStatus();
             break;
         case kMsgBackend: {
