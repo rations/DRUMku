@@ -305,6 +305,10 @@ bool MainWindow::QuitRequested()
         if (!controller.empty())
             fSettings.AddData("controller", B_RAW_TYPE, controller.data(), controller.size());
     }
+    // The MIDI sources as they are now, so ones (dis)connected in a patchbay
+    // since the last menu change are remembered too.
+    if (fHost->audioRunning())
+        SaveMidiChoice();
     fSettings.SetRect("frame", Frame());
     if (SaveSettings(fSettings) != B_OK)
         fprintf(stderr, "DRUMku: could not save the settings\n");

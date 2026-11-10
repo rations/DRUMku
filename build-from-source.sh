@@ -6,7 +6,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 SDK="${VST3_SDK_DIR:-$HERE/../VST3-renku/vst3sdk}"
 
-pkgman install -y cmake ninja gcc make
+pkgman install -y cmake ninja gcc make libsamplerate_devel
 [ -d "$SDK" ] || { echo "!! VST3 SDK not found at $SDK (set VST3_SDK_DIR)" >&2; exit 1; }
 
 cd "$HERE"

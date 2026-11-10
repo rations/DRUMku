@@ -8,7 +8,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 VERSION=0.5.0
-REVISION=1
+REVISION=2
 STAGE="$HERE/stage"
 SDK="${VST3_SDK_DIR:-$ROOT/../VST3-renku/vst3sdk}"
 
@@ -17,7 +17,7 @@ SDK="${VST3_SDK_DIR:-$ROOT/../VST3-renku/vst3sdk}"
 HAIKU_PKG=$(ls /boot/system/packages/haiku-r*-x86_64.hpkg | head -n 1)
 HAIKU_MIN=$(basename "$HAIKU_PKG" | sed -e 's/^haiku-//' -e 's/-[0-9]*-x86_64\.hpkg$//')
 
-pkgman install -y cmake ninja gcc make || true
+pkgman install -y cmake ninja gcc make libsamplerate_devel || true
 [ -d "$SDK" ] || { echo "!! VST3 SDK not found at $SDK (set VST3_SDK_DIR)" >&2; exit 1; }
 
 cd "$ROOT"

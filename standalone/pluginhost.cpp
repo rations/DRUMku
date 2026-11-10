@@ -122,6 +122,9 @@ bool PluginHost::startAudio(const std::string &backend, std::string &error)
     fBackend = backend;
     if (!HostAudio::selectBackend(backend, "DRUMku", "DRUMKU_BACKEND_DIR", error))
         return false;
+    // The plug-in's stereo input is there for hosts that insist on one; it is
+    // never read, so the app publishes no input ports for it.
+    HostAudio::publishAudioInputs(false);
     fAudio = Vst::AudioClient::create("DRUMku", fComponent, fMidiMapping);
     if (!fAudio || !HostAudio::isRunning()) {
         error = HostAudio::lastError();
