@@ -95,14 +95,16 @@ tresult PLUGIN_API DrumController::setComponentState(IBStream *state)
         int32 note = -1;
         if (!streamer.readDouble(vol) || !streamer.readInt32(note))
             return kResultFalse;
-        setParamNormalized((Vst::ParamID)(kSlotVolumeBase + i), vol);
-        double noteNorm = (double)(note < 0 ? kNoteUnassigned : note) / (double)kNoteUnassigned;
-        setParamNormalized((Vst::ParamID)(kSlotNoteBase + i), noteNorm);
-
+        // The path first: setParamNormalized redraws the editor's strip and
+        // rack row for this slot, which show the slot's sample file.
         char8 *path = streamer.readStr8();
         mSlotPath[i] = path ? path : "";
         if (path)
             delete[] path;
+
+        setParamNormalized((Vst::ParamID)(kSlotVolumeBase + i), vol);
+        double noteNorm = (double)(note < 0 ? kNoteUnassigned : note) / (double)kNoteUnassigned;
+        setParamNormalized((Vst::ParamID)(kSlotNoteBase + i), noteNorm);
     }
     return kResultOk;
 }

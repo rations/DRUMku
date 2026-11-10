@@ -193,28 +193,98 @@ inline double blackman(double t) // t in [-1, 1]
     return 0.42 - 0.5 * std::cos(a) + 0.08 * std::cos(2.0 * a);
 }
 
-void resample_channel(const std::vector<float> &src, std::vector<float> &dst, size_t dstFrames,
-                      double ratio /* dst/src */)
+// One output frame per call: the taps around source position `center`.
+double resample_frame(const std::vector<float> &src, double center, double cutoff)
 {
+    const double srcN = (double)src.size();
+    long i0 = (long)std::floor(center) - kSincHalf + 1;
+    long i1 = (long)std::floor(center) + kSincHalf;
+    double acc = 0.0, norm = 0.0;
+    for (long k = i0; k <= i1; ++k) {
+        double w = blackman((double)(k - (long)std::floor(center)) / (double)kSincHalf);
+        double s = cutoff * sinc(cutoff * (center - (double)k));
+        double coeff = w * s;
+        norm += coeff;
+        if (k >= 0 && (double)k < srcN)
+            acc += coeff * (double)src[(size_t)k];
+    }
+    return norm > 1e-12 ? acc / norm : acc;
+}
+
+// Largest phase table (phases x taps doubles, 1 MiB at this size).
+constexpr uint64_t kMaxPhases = 4096;
+
+uint64_t gcd_u64(uint64_t a, uint64_t b)
+{
+    while (b) {
+        uint64_t t = a % b;
+        a = b;
+        b = t;
+    }
+    return a;
+}
+
+void resample_channel(const std::vector<float> &src, std::vector<float> &dst, size_t dstFrames,
+                      double srcRate, double dstRate)
+{
+    const double ratio = dstRate / srcRate;
     // Low-pass cutoff (in source-nyquist units): 1 when upsampling, 1/ratio
     // when downsampling, to suppress aliasing.
     const double cutoff = ratio >= 1.0 ? 1.0 : ratio;
-    const double srcN = (double)src.size();
     dst.assign(dstFrames, 0.0f);
-    for (size_t i = 0; i < dstFrames; ++i) {
-        double center = (double)i / ratio; // position in source samples
-        long i0 = (long)std::floor(center) - kSincHalf + 1;
-        long i1 = (long)std::floor(center) + kSincHalf;
-        double acc = 0.0, norm = 0.0;
-        for (long k = i0; k <= i1; ++k) {
-            double w = blackman((double)(k - (long)std::floor(center)) / (double)kSincHalf);
-            double s = cutoff * sinc(cutoff * (center - (double)k));
-            double coeff = w * s;
-            norm += coeff;
-            if (k >= 0 && (double)k < srcN)
-                acc += coeff * (double)src[(size_t)k];
+
+    // Output frame i sits at source position i * S / D. With whole rates S
+    // and D and g = gcd(S, D), its fractional part repeats every L = D / g
+    // frames, and the taps depend on nothing else: work them out once per
+    // phase instead of once per frame (the sin/cos calls were nearly all of
+    // the load time at high rates).
+    const double sr = std::round(srcRate), dr = std::round(dstRate);
+    const bool whole = std::fabs(srcRate - sr) < 1e-6 && std::fabs(dstRate - dr) < 1e-6 &&
+                       sr >= 1.0 && dr >= 1.0 && sr < 1e7 && dr < 1e7;
+    const uint64_t S = whole ? (uint64_t)sr : 0, D = whole ? (uint64_t)dr : 0;
+    const uint64_t L = whole ? D / gcd_u64(S, D) : 0;
+    if (!whole || L > kMaxPhases) {
+        for (size_t i = 0; i < dstFrames; ++i)
+            dst[i] = (float)resample_frame(src, (double)i / ratio, cutoff);
+        return;
+    }
+
+    constexpr int kTaps = 2 * kSincHalf;
+    std::vector<double> table((size_t)L * kTaps);
+    for (uint64_t p = 0; p < L; ++p) {
+        const double frac = (double)((p * S) % D) / (double)D;
+        double *t = &table[(size_t)p * kTaps];
+        double norm = 0.0;
+        for (int j = 0; j < kTaps; ++j) {
+            const int off = j - kSincHalf + 1; // tap at floor(center) + off
+            double c = blackman((double)off / (double)kSincHalf) *
+                       (cutoff * sinc(cutoff * (frac - (double)off)));
+            t[j] = c;
+            norm += c;
         }
-        dst[i] = (float)(norm > 1e-12 ? acc / norm : acc);
+        if (norm > 1e-12)
+            for (int j = 0; j < kTaps; ++j)
+                t[j] /= norm;
+    }
+
+    const long srcN = (long)src.size();
+    for (size_t i = 0; i < dstFrames; ++i) {
+        const uint64_t pos = (uint64_t)i * S;
+        const long base = (long)(pos / D) - kSincHalf + 1;
+        const double *t = &table[(size_t)(i % L) * kTaps];
+        double acc = 0.0;
+        if (base >= 0 && base + kTaps <= srcN) {
+            const float *x = &src[(size_t)base];
+            for (int j = 0; j < kTaps; ++j)
+                acc += t[j] * (double)x[j];
+        } else {
+            for (int j = 0; j < kTaps; ++j) {
+                const long k = base + j;
+                if (k >= 0 && k < srcN)
+                    acc += t[j] * (double)src[(size_t)k];
+            }
+        }
+        dst[i] = (float)acc;
     }
 }
 
@@ -247,9 +317,9 @@ bool wav_load_resampled(const std::string &path, double targetRate, DrumSample &
 
     out.channels = raw.channels;
     out.frames = (int)dstFrames;
-    resample_channel(raw.ch0, out.ch0, dstFrames, ratio);
+    resample_channel(raw.ch0, out.ch0, dstFrames, sourceRate, targetRate);
     if (raw.channels > 1)
-        resample_channel(raw.ch1, out.ch1, dstFrames, ratio);
+        resample_channel(raw.ch1, out.ch1, dstFrames, sourceRate, targetRate);
     else
         out.ch1.clear();
     return true;

@@ -34,7 +34,10 @@ public:
     double sampleRate() const { return mSampleRate; }
 
     // Load / clear the sample for a slot; returns false if the file cannot be
-    // read or parsed (the slot is left unchanged in that case).
+    // read or parsed (the slot is left unchanged in that case). Before the
+    // first setup() the rate is not known yet, so a load only records the
+    // path (and returns true): setup() decodes it once, at the real rate,
+    // instead of once at a guessed rate and again at the real one.
     bool loadSample(int slot, const std::string &path);
     void clearSample(int slot);
     const std::string &slotPath(int slot) const;
@@ -78,6 +81,7 @@ private:
     int mStealCursor = 0;
     double mSampleRate = 48000.0;
     int mMaxBlockSize = 2048;
+    bool mPrepared = false; // setup() has run: the rate is known
     std::string mEmpty;
 };
 

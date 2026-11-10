@@ -20,6 +20,7 @@ void DrumEngine::setup(double sampleRate, int maxBlockSize)
 {
     mSampleRate = sampleRate > 0.0 ? sampleRate : 48000.0;
     mMaxBlockSize = maxBlockSize > 0 ? maxBlockSize : 2048;
+    mPrepared = true;
 
     // Re-resample every loaded sample to the (possibly new) engine rate.
     // Processing is inactive here, so staging + an immediate swap is safe.
@@ -38,6 +39,10 @@ bool DrumEngine::loadSample(int slot, const std::string &path)
         return false;
     if (path.empty()) {
         clearSample(slot);
+        return true;
+    }
+    if (!mPrepared) {
+        mSlots[slot].path = path; // decoded by setup()
         return true;
     }
     auto sample = std::make_unique<DrumSample>();
