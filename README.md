@@ -31,7 +31,7 @@ make validate   # run the SDK validator against the installed bundle
 ```
 
 Point the build at a specific SDK with `-DVST3_SDK_DIR=<path>` (default
-`../VST3-haiku/vst3sdk`).
+`../VST3-renku/vst3sdk`).
 
 ## Install / packaging (RenkuOS)
 

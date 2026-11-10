@@ -1,6 +1,6 @@
 #!/bin/sh
 # make-hpkg.sh — build the `drumku` .hpkg on a running Haiku (x86_64). Builds against
-# the VST3-haiku SDK checkout (default ../VST3-haiku/vst3sdk; override VST3_SDK_DIR).
+# the VST3-renku SDK checkout (default ../VST3-renku/vst3sdk; override VST3_SDK_DIR).
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -8,7 +8,7 @@ ROOT=$(cd "$HERE/.." && pwd)
 VERSION=0.4.0
 REVISION=1
 STAGE="$HERE/stage"
-SDK="${VST3_SDK_DIR:-$ROOT/../VST3-haiku/vst3sdk}"
+SDK="${VST3_SDK_DIR:-$ROOT/../VST3-renku/vst3sdk}"
 
 pkgman install -y cmake ninja gcc make || true
 [ -d "$SDK" ] || { echo "!! VST3 SDK not found at $SDK (set VST3_SDK_DIR)" >&2; exit 1; }

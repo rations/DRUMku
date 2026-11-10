@@ -1,10 +1,10 @@
 #!/bin/sh
 # build-from-source.sh — build DRUMku from source and install it for the current user.
-# Needs the VST3-haiku SDK checkout (default ../VST3-haiku; override VST3_SDK_DIR).
+# Needs the VST3-renku SDK checkout (default ../VST3-renku; override VST3_SDK_DIR).
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-SDK="${VST3_SDK_DIR:-$HERE/../VST3-haiku/vst3sdk}"
+SDK="${VST3_SDK_DIR:-$HERE/../VST3-renku/vst3sdk}"
 
 pkgman install -y cmake ninja gcc make
 [ -d "$SDK" ] || { echo "!! VST3 SDK not found at $SDK (set VST3_SDK_DIR)" >&2; exit 1; }
